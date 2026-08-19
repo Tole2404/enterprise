@@ -1,0 +1,24 @@
+# Go Binaries & Compilations
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+erp-api-new.exe
+bin/
+dist/
+vendor/
+.gocache/
+
+# Environment Variables
+.env
+!.env.example
+
+# Logs
+*.log
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
