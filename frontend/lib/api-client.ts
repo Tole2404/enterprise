@@ -1,4 +1,17 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
+const getBaseUrl = (): string => {
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    // If running on a remote VPS IP or domain, automatically connect to port 8080 or configured API URL
+    if (hostname !== "localhost" && hostname !== "127.0.0.1") {
+      if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes("localhost")) {
+        return process.env.NEXT_PUBLIC_API_URL;
+      }
+      const protocol = window.location.protocol;
+      return `${protocol}//${hostname}:8080/api/v1`;
+    }
+  }
+  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
+};
 
 interface FetchOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
@@ -50,7 +63,7 @@ class ApiClient {
   async request<T>(endpoint: string, options: FetchOptions = {}): Promise<ApiResponse<T>> {
     const { params, ...customConfig } = options;
 
-    let url = `${BASE_URL}${endpoint}`;
+    let url = `${getBaseUrl()}${endpoint}`;
     if (params) {
       const searchParams = new URLSearchParams();
       Object.entries(params).forEach(([key, value]) => {
