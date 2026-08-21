@@ -28,6 +28,7 @@ import {
   Tag,
   Scale,
   Warehouse,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-store";
@@ -199,6 +200,21 @@ export function MobileSidebar({ isOpen, onClose }: MobileSidebarProps) {
             >
               <LayoutDashboard className="h-4 w-4 text-indigo-600" />
               <span>Dashboard</span>
+            </Link>
+
+            {/* AI Agentic Link */}
+            <Link
+              href="/ai-agentic"
+              onClick={onClose}
+              className={cn(
+                "flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors",
+                pathname === "/ai-agentic"
+                  ? "text-purple-600 dark:text-purple-400 font-bold bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/50"
+                  : "text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
+              )}
+            >
+              <Bot className="h-4 w-4 text-purple-600" />
+              <span>AI Agentic Hub</span>
             </Link>
 
             {/* Accordion Groups */}

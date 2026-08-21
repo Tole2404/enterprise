@@ -27,6 +27,8 @@ import {
   Tag,
   Scale,
   Warehouse,
+  Bot,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-store";
@@ -281,6 +283,23 @@ export function Sidebar() {
         >
           <LayoutDashboard className={cn("h-4 w-4", isDashboardActive ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400")} />
           <span>Dashboard</span>
+        </Link>
+
+        {/* Single Item: AI Agentic Center */}
+        <Link
+          href="/ai-agentic"
+          className={cn(
+            "flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150",
+            pathname === "/ai-agentic"
+              ? "text-purple-600 dark:text-purple-400 font-bold bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/50"
+              : "text-slate-600 hover:text-purple-600 hover:bg-purple-50/50 dark:text-slate-400 dark:hover:text-purple-300 dark:hover:bg-purple-950/20"
+          )}
+        >
+          <Bot className={cn("h-4 w-4", pathname === "/ai-agentic" ? "text-purple-600 dark:text-purple-400" : "text-purple-500")} />
+          <span className="flex-1">AI Agentic Hub</span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 font-semibold">
+            Auto
+          </span>
         </Link>
 
         {/* Accordion Categories */}
