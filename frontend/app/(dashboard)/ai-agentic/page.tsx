@@ -33,16 +33,20 @@ import {
   ExternalLink,
   ShieldCheck,
   Flame,
-  Inbox,
-  ArrowRight,
-  GitBranch,
-  Network
+  Plus,
+  Minus,
+  Maximize2,
+  Eye,
+  X,
+  Minimize2,
+  ChevronDown,
+  Layers
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import apiClient from "@/lib/api-client";
 
-interface AgentSubNode {
+interface AgentNodeData {
   id: string;
   name: string;
   role: string;
@@ -50,13 +54,15 @@ interface AgentSubNode {
   avatarIcon: string;
   icon: React.ElementType;
   status: "IDLE" | "SCANNING" | "EXECUTING" | "SYNCING";
-  color: string;
-  borderColor: string;
-  bgGlow: string;
+  colorText: string;
+  colorBorder: string;
   activeBorder: string;
-  activeGlow: string;
+  glowColor: string;
   duty: string;
   tasksCompleted: number;
+  // Node coordinates on 1000x700 virtual canvas
+  x: number;
+  y: number;
 }
 
 interface CompletedTask {
@@ -86,136 +92,142 @@ interface ChatMessage {
   targetAgent?: string;
 }
 
-export default function AgenticAIPage() {
+export default function AgenticNodeGraphPage() {
   const [inputText, setInputText] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"SWARM_CHAT" | "TASK_LEDGER">("SWARM_CHAT");
-  const [filterAgent, setFilterAgent] = useState<string>("ALL");
   const [isSwarmDebating, setIsSwarmDebating] = useState(false);
-  
-  // Pipeline connection state: Source Agent -> Target Agent
-  const [activeConnection, setActiveConnection] = useState<{
-    from: string;
-    to: string;
-    label: string;
-  } | null>(null);
-
   const [currentSpeakingAgent, setCurrentSpeakingAgent] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<AgentNodeData | null>(null);
+  const [showTerminal, setShowTerminal] = useState(true);
+  const [terminalTab, setTerminalTab] = useState<"SWARM_CHAT" | "TASK_LEDGER">("SWARM_CHAT");
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // 6 Multi-Agent Swarm Profiles
-  const [agentSwarm, setAgentSwarm] = useState<AgentSubNode[]>([
+  // Center Coordinates (Hermes AI Robot Hub)
+  const centerX = 500;
+  const centerY = 340;
+
+  // 6 Radial Autonomous Satellite Nodes (arranged like the mindmap topology)
+  const [nodes, setNodes] = useState<AgentNodeData[]>([
+    {
+      id: "audit",
+      name: "Bram (ACID Sentinel)",
+      role: "AUDIT_WATCHDOG",
+      division: "Integritas Database",
+      avatarIcon: "🛡️",
+      icon: ShieldAlert,
+      status: "IDLE",
+      colorText: "text-rose-400",
+      colorBorder: "border-rose-500/40 hover:border-rose-400",
+      activeBorder: "border-rose-400 ring-2 ring-rose-400 shadow-xl shadow-rose-500/50",
+      glowColor: "rgba(244, 63, 94, 0.8)",
+      duty: "Audit konsistensi multi-skema & foreign keys PostgreSQL",
+      tasksCompleted: 0,
+      x: 500,
+      y: 110
+    },
     {
       id: "inv",
-      name: "Rian",
-      role: "INVENTORY_BOT",
+      name: "Rian (Inventory Bot)",
+      role: "INVENTORY_AUTONOMY",
       division: "Inventori & Gudang",
       avatarIcon: "📦",
       icon: Box,
       status: "IDLE",
-      color: "text-cyan-400",
-      borderColor: "border-cyan-500/40 hover:border-cyan-400",
-      bgGlow: "bg-cyan-500/10",
-      activeBorder: "border-cyan-400 ring-2 ring-cyan-400 shadow-lg shadow-cyan-500/40",
-      activeGlow: "bg-cyan-500/20",
-      duty: "Pindai stok minimum, mutasi gudang & deteksi restock",
-      tasksCompleted: 0
+      colorText: "text-cyan-400",
+      colorBorder: "border-cyan-500/40 hover:border-cyan-400",
+      activeBorder: "border-cyan-400 ring-2 ring-cyan-400 shadow-xl shadow-cyan-500/50",
+      glowColor: "rgba(6, 182, 212, 0.8)",
+      duty: "Pindai stok minimum, mutasi gudang & safety stock",
+      tasksCompleted: 0,
+      x: 210,
+      y: 190
     },
     {
       id: "proc",
-      name: "Siti",
-      role: "PROCUREMENT_BOT",
+      name: "Siti (Procurement Bot)",
+      role: "PROCUREMENT_AUTONOMY",
       division: "Pengadaan (Purchasing)",
       avatarIcon: "🛒",
       icon: ShoppingCart,
       status: "IDLE",
-      color: "text-emerald-400",
-      borderColor: "border-emerald-500/40 hover:border-emerald-400",
-      bgGlow: "bg-emerald-500/10",
-      activeBorder: "border-emerald-400 ring-2 ring-emerald-400 shadow-lg shadow-emerald-500/40",
-      activeGlow: "bg-emerald-500/20",
-      duty: "Auto-draft Purchase Request & PO ke vendor rekanan",
-      tasksCompleted: 0
+      colorText: "text-emerald-400",
+      colorBorder: "border-emerald-500/40 hover:border-emerald-400",
+      activeBorder: "border-emerald-400 ring-2 ring-emerald-400 shadow-xl shadow-emerald-500/50",
+      glowColor: "rgba(16, 185, 129, 0.8)",
+      duty: "Auto-draft Purchase Request & PO ke vendor",
+      tasksCompleted: 0,
+      x: 790,
+      y: 190
     },
     {
       id: "sales",
-      name: "Dimas",
-      role: "SALES_BOT",
+      name: "Dimas (Sales Bot)",
+      role: "SALES_AUTONOMY",
       division: "Penjualan & Distribusi",
       avatarIcon: "💼",
       icon: Receipt,
       status: "IDLE",
-      color: "text-amber-400",
-      borderColor: "border-amber-500/40 hover:border-amber-400",
-      bgGlow: "bg-amber-500/10",
-      activeBorder: "border-amber-400 ring-2 ring-amber-400 shadow-lg shadow-amber-500/40",
-      activeGlow: "bg-amber-500/20",
-      duty: "Validasi stok SO, terbitkan Surat Jalan DO & Invoice",
-      tasksCompleted: 0
+      colorText: "text-amber-400",
+      colorBorder: "border-amber-500/40 hover:border-amber-400",
+      activeBorder: "border-amber-400 ring-2 ring-amber-400 shadow-xl shadow-amber-500/50",
+      glowColor: "rgba(245, 158, 11, 0.8)",
+      duty: "Validasi stok SO, terbitkan Surat Jalan & Invoice",
+      tasksCompleted: 0,
+      x: 820,
+      y: 470
     },
     {
       id: "fin",
-      name: "Dewi",
-      role: "FINANCE_SENTINEL",
+      name: "Dewi (Finance Sentinel)",
+      role: "FINANCE_WATCHDOG",
       division: "Keuangan & Akuntansi",
       avatarIcon: "📊",
       icon: DollarSign,
       status: "IDLE",
-      color: "text-indigo-400",
-      borderColor: "border-indigo-500/40 hover:border-indigo-400",
-      bgGlow: "bg-indigo-500/10",
-      activeBorder: "border-indigo-400 ring-2 ring-indigo-400 shadow-lg shadow-indigo-500/40",
-      activeGlow: "bg-indigo-500/20",
-      duty: "Auto-jurnal double entry & verifikasi balance sheet",
-      tasksCompleted: 0
+      colorText: "text-indigo-400",
+      colorBorder: "border-indigo-500/40 hover:border-indigo-400",
+      activeBorder: "border-indigo-400 ring-2 ring-indigo-400 shadow-xl shadow-indigo-500/50",
+      glowColor: "rgba(99, 102, 241, 0.8)",
+      duty: "Auto-jurnal double entry & balance sheet audit",
+      tasksCompleted: 0,
+      x: 500,
+      y: 570
     },
     {
       id: "hr",
-      name: "Maya",
-      role: "HR_BOT",
+      name: "Maya (HR Bot)",
+      role: "HR_AUTONOMY",
       division: "Sumber Daya Manusia",
       avatarIcon: "👥",
       icon: Users,
       status: "IDLE",
-      color: "text-pink-400",
-      borderColor: "border-pink-500/40 hover:border-pink-400",
-      bgGlow: "bg-pink-500/10",
-      activeBorder: "border-pink-400 ring-2 ring-pink-400 shadow-lg shadow-pink-500/40",
-      activeGlow: "bg-pink-500/20",
-      duty: "Batch generator payroll & workflow persetujuan cuti",
-      tasksCompleted: 0
-    },
-    {
-      id: "audit",
-      name: "Bram",
-      role: "ACID_WATCHDOG",
-      division: "Integritas Sistem",
-      avatarIcon: "🛡️",
-      icon: ShieldAlert,
-      status: "IDLE",
-      color: "text-rose-400",
-      borderColor: "border-rose-500/40 hover:border-rose-400",
-      bgGlow: "bg-rose-500/10",
-      activeBorder: "border-rose-400 ring-2 ring-rose-400 shadow-lg shadow-rose-500/40",
-      activeGlow: "bg-rose-500/20",
-      duty: "Audit konsistensi multi-skema & deteksi anomali data",
-      tasksCompleted: 0
+      colorText: "text-pink-400",
+      colorBorder: "border-pink-500/40 hover:border-pink-400",
+      activeBorder: "border-pink-400 ring-2 ring-pink-400 shadow-xl shadow-pink-500/50",
+      glowColor: "rgba(236, 72, 153, 0.8)",
+      duty: "Batch generator payroll & persetujuan cuti",
+      tasksCompleted: 0,
+      x: 190,
+      y: 470
     }
   ]);
 
   // Real Completed Tasks Ledger (Zero dummy)
   const [completedTasks, setCompletedTasks] = useState<CompletedTask[]>([]);
 
-  // Initial Clean Message
+  // Initial Message
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "msg-init",
       timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
       senderRole: "HERMES_CORE",
       senderName: "HERMES Core AI Orchestrator",
-      division: "Master Controller",
+      division: "Central Topology",
       avatarIcon: "🤖",
-      message: "Hermes Agentic Swarm siap beroperasi. Seluruh 6 sub-agent divisi terhubung langsung ke database PostgreSQL. Klik 'Mulai Obrolan Antar-Agen' untuk melihat garis alur delegasi task antar-agen secara langsung.",
+      message: "Hermes Autonomous Node Topology Online. Struktur 6 agen divisi terhubung langsung ke PostgreSQL. Klik 'Mulai Obrolan Antar-Agen' untuk melihat laser transmisi data antar-node secara live.",
       status: "INFO"
     }
   ]);
@@ -224,41 +236,32 @@ export default function AgenticAIPage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isProcessing]);
 
-  // Helper to update individual agent status
-  const updateAgentStatus = (agentId: string, status: "IDLE" | "SCANNING" | "EXECUTING" | "SYNCING") => {
-    setAgentSwarm((prev) =>
-      prev.map((ag) => (ag.id === agentId ? { ...ag, status } : ag))
+  const updateNodeStatus = (nodeId: string, status: "IDLE" | "SCANNING" | "EXECUTING" | "SYNCING") => {
+    setNodes((prev) =>
+      prev.map((n) => (n.id === nodeId ? { ...n, status } : n))
     );
   };
 
-  // Increment completed tasks count for a specific agent
-  const incrementAgentTask = (agentId: string) => {
-    setAgentSwarm((prev) =>
-      prev.map((ag) =>
-        ag.id === agentId
-          ? { ...ag, tasksCompleted: ag.tasksCompleted + 1, status: "IDLE" }
-          : ag
+  const incrementNodeTask = (nodeId: string) => {
+    setNodes((prev) =>
+      prev.map((n) =>
+        n.id === nodeId
+          ? { ...n, tasksCompleted: n.tasksCompleted + 1, status: "IDLE" }
+          : n
       )
     );
   };
 
-  // Trigger Real Multi-Agent Inter-Dialogue with ANIMATED PIPELINE CONNECTION LINES
+  // Trigger Real Multi-Agent Inter-Dialogue with REAL DATABASE QUERIES & LIVE GLOWING CURVES
   const triggerMultiAgentDebate = async () => {
     if (isSwarmDebating) return;
     setIsSwarmDebating(true);
+    setShowTerminal(true);
 
     try {
-      // ─────────────────────────────────────────────────────────────
-      // STAGE 1: INVENTORY AGENT (Rian) -> PROCUREMENT (Siti)
-      // ─────────────────────────────────────────────────────────────
+      // 1. INVENTORY (Rian)
       setCurrentSpeakingAgent("inv");
-      updateAgentStatus("inv", "SCANNING");
-      setActiveConnection({
-        from: "Rian (Inventori)",
-        to: "Siti (Pengadaan)",
-        label: "RESTOCK & SAFETY STOCK SCAN"
-      });
-
+      updateNodeStatus("inv", "SCANNING");
       let invText = "📦 [Rian - Inventori]: Memindai tabel inventory.products & warehouse_stocks di PostgreSQL...";
       let invAlertsCount = 0;
       try {
@@ -269,7 +272,7 @@ export default function AgenticAIPage() {
         if (invAlertsCount > 0) {
           invText = `📦 [Rian - Inventori]: Terdeteksi ${invAlertsCount} SKU yang stoknya menyentuh batas minimum. Mengirim sinyal restock ke @Siti (Procurement).`;
         } else {
-          invText = `📦 [Rian - Inventori]: Seluruh stok produk di gudang optimal. Tidak ada barang yang kehabisan stok. Mengirim sinyal konfirmasi ke @Siti.`;
+          invText = `📦 [Rian - Inventori]: Seluruh stok produk di gudang optimal. Mengirim konfirmasi ketersediaan barang ke @Siti.`;
         }
       } catch (e) {
         invText = "📦 [Rian - Inventori]: Pemindaian stok gudang selesai terverifikasi di PostgreSQL. Mengirim data ke @Siti.";
@@ -282,14 +285,14 @@ export default function AgenticAIPage() {
           timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
           senderRole: "INVENTORY_BOT",
           senderName: "Rian",
-          division: "Inventori & Gudang",
+          division: "Inventori",
           avatarIcon: "📦",
           message: invText,
           status: invAlertsCount > 0 ? "WARNING" : "SUCCESS",
           targetAgent: "Siti (Procurement)"
         }
       ]);
-      incrementAgentTask("inv");
+      incrementNodeTask("inv");
       setCompletedTasks((prev) => [
         {
           id: `TSK-${Date.now().toString().slice(-4)}`,
@@ -306,19 +309,11 @@ export default function AgenticAIPage() {
         ...prev
       ]);
 
-      await new Promise((r) => setTimeout(r, 1800));
+      await new Promise((r) => setTimeout(r, 2000));
 
-      // ─────────────────────────────────────────────────────────────
-      // STAGE 2: PROCUREMENT (Siti) -> SALES (Dimas)
-      // ─────────────────────────────────────────────────────────────
+      // 2. PROCUREMENT (Siti)
       setCurrentSpeakingAgent("proc");
-      updateAgentStatus("proc", "EXECUTING");
-      setActiveConnection({
-        from: "Siti (Pengadaan)",
-        to: "Dimas (Penjualan)",
-        label: "SUPPLIER PO & CATALOG PIPELINE"
-      });
-
+      updateNodeStatus("proc", "EXECUTING");
       let procText = "🛒 [Siti - Procurement]: Menerima koordinasi dari Rian. Memeriksa antrian Purchase Order dan katalog vendor...";
       try {
         const poRes = await apiClient.get<any>("/purchasing/orders?page=1&limit=5");
@@ -336,14 +331,14 @@ export default function AgenticAIPage() {
           timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
           senderRole: "PROCUREMENT_BOT",
           senderName: "Siti",
-          division: "Pengadaan (Purchasing)",
+          division: "Pengadaan",
           avatarIcon: "🛒",
           message: procText,
           status: "SUCCESS",
           targetAgent: "Dimas (Sales)"
         }
       ]);
-      incrementAgentTask("proc");
+      incrementNodeTask("proc");
       setCompletedTasks((prev) => [
         {
           id: `TSK-${Date.now().toString().slice(-4)}`,
@@ -360,20 +355,12 @@ export default function AgenticAIPage() {
         ...prev
       ]);
 
-      await new Promise((r) => setTimeout(r, 1800));
+      await new Promise((r) => setTimeout(r, 2000));
 
-      // ─────────────────────────────────────────────────────────────
-      // STAGE 3: SALES (Dimas) -> FINANCE (Dewi)
-      // ─────────────────────────────────────────────────────────────
+      // 3. SALES (Dimas)
       setCurrentSpeakingAgent("sales");
-      updateAgentStatus("sales", "EXECUTING");
-      setActiveConnection({
-        from: "Dimas (Penjualan)",
-        to: "Dewi (Keuangan)",
-        label: "SALES ORDER & INVOICE MATCHING"
-      });
-
-      let salesText = "💼 [Dimas - Sales]: Memeriksa pesanan pelanggan Sales Order & penerbitan Surat Jalan...";
+      updateNodeStatus("sales", "EXECUTING");
+      let salesText = "💼 [Dimas - Sales]: Memeriksa pesanan pelanggan Sales Order & alur Surat Jalan DO...";
       try {
         const soRes = await apiClient.get<any>("/sales/orders?page=1&limit=5");
         const soData = soRes.data?.data || soRes.data;
@@ -390,14 +377,14 @@ export default function AgenticAIPage() {
           timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
           senderRole: "SALES_BOT",
           senderName: "Dimas",
-          division: "Penjualan & Distribusi",
+          division: "Penjualan",
           avatarIcon: "💼",
           message: salesText,
           status: "SUCCESS",
           targetAgent: "Dewi (Finance)"
         }
       ]);
-      incrementAgentTask("sales");
+      incrementNodeTask("sales");
       setCompletedTasks((prev) => [
         {
           id: `TSK-${Date.now().toString().slice(-4)}`,
@@ -414,19 +401,11 @@ export default function AgenticAIPage() {
         ...prev
       ]);
 
-      await new Promise((r) => setTimeout(r, 1800));
+      await new Promise((r) => setTimeout(r, 2000));
 
-      // ─────────────────────────────────────────────────────────────
-      // STAGE 4: FINANCE (Dewi) -> HR (Maya)
-      // ─────────────────────────────────────────────────────────────
+      // 4. FINANCE (Dewi)
       setCurrentSpeakingAgent("fin");
-      updateAgentStatus("fin", "SYNCING");
-      setActiveConnection({
-        from: "Dewi (Keuangan)",
-        to: "Maya (HR)",
-        label: "DOUBLE-ENTRY & PAYROLL CLEARANCE"
-      });
-
+      updateNodeStatus("fin", "SYNCING");
       let finText = "📊 [Dewi - Finance]: Memverifikasi buku jurnal umum double-entry di PostgreSQL...";
       try {
         const finRes = await apiClient.get<any>("/finance/reports/trial-balance");
@@ -449,14 +428,14 @@ export default function AgenticAIPage() {
           timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
           senderRole: "FINANCE_SENTINEL",
           senderName: "Dewi",
-          division: "Keuangan & Akuntansi",
+          division: "Keuangan",
           avatarIcon: "📊",
           message: finText,
           status: "SUCCESS",
           targetAgent: "Maya (HR)"
         }
       ]);
-      incrementAgentTask("fin");
+      incrementNodeTask("fin");
       setCompletedTasks((prev) => [
         {
           id: `TSK-${Date.now().toString().slice(-4)}`,
@@ -473,19 +452,11 @@ export default function AgenticAIPage() {
         ...prev
       ]);
 
-      await new Promise((r) => setTimeout(r, 1800));
+      await new Promise((r) => setTimeout(r, 2000));
 
-      // ─────────────────────────────────────────────────────────────
-      // STAGE 5: HR (Maya) -> ACID SENTINEL (Bram)
-      // ─────────────────────────────────────────────────────────────
+      // 5. HR (Maya)
       setCurrentSpeakingAgent("hr");
-      updateAgentStatus("hr", "EXECUTING");
-      setActiveConnection({
-        from: "Maya (HR)",
-        to: "Bram (Sentinel)",
-        label: "PAYROLL & LOGISTICS PERSONNEL AUDIT"
-      });
-
+      updateNodeStatus("hr", "EXECUTING");
       let hrText = "👥 [Maya - HR]: Memeriksa personil operasional di database hr.employees...";
       try {
         const hrRes = await apiClient.get<any>("/hr/employees?page=1&limit=5");
@@ -503,14 +474,14 @@ export default function AgenticAIPage() {
           timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
           senderRole: "HR_BOT",
           senderName: "Maya",
-          division: "Sumber Daya Manusia",
+          division: "SDM",
           avatarIcon: "👥",
           message: hrText,
           status: "SUCCESS",
           targetAgent: "Bram (Sentinel)"
         }
       ]);
-      incrementAgentTask("hr");
+      incrementNodeTask("hr");
       setCompletedTasks((prev) => [
         {
           id: `TSK-${Date.now().toString().slice(-4)}`,
@@ -527,26 +498,18 @@ export default function AgenticAIPage() {
         ...prev
       ]);
 
-      await new Promise((r) => setTimeout(r, 1800));
+      await new Promise((r) => setTimeout(r, 2000));
 
-      // ─────────────────────────────────────────────────────────────
-      // STAGE 6: ACID SENTINEL (Bram) -> ALL SWARM (Commit Complete)
-      // ─────────────────────────────────────────────────────────────
+      // 6. ACID SENTINEL (Bram)
       setCurrentSpeakingAgent("audit");
-      updateAgentStatus("audit", "SYNCING");
-      setActiveConnection({
-        from: "Bram (Sentinel)",
-        to: "Hermes Core",
-        label: "POSTGRESQL ACID COMMIT COMPLETE"
-      });
-
+      updateNodeStatus("audit", "SYNCING");
       let auditText = "🛡️ [Bram - ACID Sentinel]: Memindai integritas referensial dan foreign keys di PostgreSQL...";
       try {
         const auditRes = await apiClient.get<any>("/agent/audit/anomalies");
         const auditData = auditRes.data?.data || auditRes.data;
         const issues = Array.isArray(auditData?.Data) ? auditData.Data : [];
         if (issues.length === 0) {
-          auditText = `🛡️ [Bram - ACID Sentinel]: Audit integritas selesai: 0 anomali terdeteksi. Seluruh relasi skema (auth, inventory, purchasing, sales, finance, hr) 100% konsisten!`;
+          auditText = `🛡️ [Bram - ACID Sentinel]: Audit integritas selesai: 0 anomali terdeteksi. Seluruh relasi skema 100% konsisten dan aman!`;
         } else {
           auditText = `🛡️ [Bram - ACID Sentinel]: Audit selesai: terdeteksi ${issues.length} catatan perlu perhatian. Transaksi telah di-log.`;
         }
@@ -567,7 +530,7 @@ export default function AgenticAIPage() {
           status: "SUCCESS"
         }
       ]);
-      incrementAgentTask("audit");
+      incrementNodeTask("audit");
       setCompletedTasks((prev) => [
         {
           id: `TSK-${Date.now().toString().slice(-4)}`,
@@ -585,30 +548,29 @@ export default function AgenticAIPage() {
       ]);
     } finally {
       setCurrentSpeakingAgent(null);
-      setActiveConnection(null);
       setIsSwarmDebating(false);
     }
   };
 
-  // Handle Real User Command
-  const handleSendCommand = async (customPrompt?: string) => {
-    const textToRun = customPrompt || inputText;
-    if (!textToRun.trim() || isProcessing) return;
+  const handleSendCommand = async () => {
+    if (!inputText.trim() || isProcessing) return;
 
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
       senderRole: "OPERATOR",
       senderName: "Anda (Operator ERP)",
-      message: textToRun
+      message: inputText
     };
 
     setMessages((prev) => [...prev, userMsg]);
+    const cmd = inputText;
     setInputText("");
     setIsProcessing(true);
+    setShowTerminal(true);
 
     try {
-      const res = await apiClient.post<any>("/agent/command", { command: textToRun });
+      const res = await apiClient.post<any>("/agent/command", { command: cmd });
       const data = res.data?.data || res.data;
 
       const aiMsg: ChatMessage = {
@@ -624,14 +586,13 @@ export default function AgenticAIPage() {
 
       setMessages((prev) => [...prev, aiMsg]);
 
-      // Add to completed tasks dynamically
       setCompletedTasks((prev) => [
         {
           id: `TSK-${Date.now().toString().slice(-4)}`,
-          agentName: "Hermes Agentic Core",
+          agentName: "Hermes Agentic Swarm",
           agentRole: "AUTONOMOUS_EXECUTION",
           division: "ERP Engine",
-          taskTitle: textToRun,
+          taskTitle: cmd,
           targetSchema: "database.erp_db",
           timestamp: "Baru saja",
           status: "ACID_COMMITTED",
@@ -646,7 +607,7 @@ export default function AgenticAIPage() {
         timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
         senderRole: "HERMES_CORE",
         senderName: "Hermes Agentic AI",
-        message: `Perintah '${textToRun}' telah diproses oleh sub-agent divisi terkait.`,
+        message: `Perintah '${cmd}' telah diproses oleh sub-agent divisi terkait.`,
         actionTag: "DIRECT_EXECUTION",
         status: "SUCCESS"
       };
@@ -657,56 +618,46 @@ export default function AgenticAIPage() {
     }
   };
 
-  const filteredMessages = filterAgent === "ALL"
-    ? messages
-    : messages.filter((m) => m.senderRole.toLowerCase().includes(filterAgent.toLowerCase()) || m.senderRole === "OPERATOR");
-
   return (
-    <div className="min-h-screen -m-4 sm:-m-6 lg:-m-8 bg-slate-950 text-slate-100 font-sans flex flex-col">
+    <div className="relative h-[calc(100vh-4rem)] -m-4 sm:-m-6 lg:-m-8 bg-slate-950 text-slate-100 font-sans flex flex-col overflow-hidden select-none">
       
-      {/* 🚀 1. TOP FUTURISTIC COCKPIT HEADER */}
-      <div className="border-b border-slate-800/80 bg-slate-900/70 backdrop-blur-xl px-4 sm:px-8 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 sticky top-0 z-30">
-        <div className="flex items-center gap-3.5">
-          <div className="relative">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 p-0.5 shadow-lg shadow-cyan-500/20 animate-pulse">
-              <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-                <Bot className="h-5 w-5 text-cyan-400" />
-              </div>
+      {/* 🚀 TOP COCKPIT FLOATING HEADER */}
+      <div className="absolute top-4 left-4 right-4 z-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-900/80 backdrop-blur-xl border border-slate-800/90 rounded-2xl px-5 py-3 shadow-2xl">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 p-0.5 shadow-lg shadow-cyan-500/20 flex items-center justify-center">
+            <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
+              <Bot className="h-4 w-4 text-cyan-400" />
             </div>
-            <span className="absolute -bottom-1 -right-1 flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
-            </span>
           </div>
 
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg sm:text-xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-teal-300 to-indigo-400">
-                HERMES AGENTIC AI CORE
+              <h1 className="text-sm sm:text-base font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-teal-300 to-indigo-400">
+                HERMES AGENTIC TOPOLOGY
               </h1>
-              <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30 text-[10px] font-mono px-2">
-                INTER-AGENT NEURAL MESH
+              <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30 text-[9px] font-mono px-2">
+                ACTIVE GRAPH MESH
               </Badge>
             </div>
-            <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5 font-mono">
+            <p className="text-[11px] text-slate-400 flex items-center gap-1.5 font-mono">
               <Activity className="h-3 w-3 text-emerald-400 animate-pulse" />
-              <span>LIVE TASK DELEGATION PIPELINE & ACTIVE CONNECTION INDICATOR</span>
+              <span>6 AGENT SATELLITES CONNECTED TO CENTRAL ROBOT CORE</span>
             </p>
           </div>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-2.5">
+        {/* Header Action Buttons */}
+        <div className="flex items-center gap-2 self-end sm:self-center">
           <Button
             size="sm"
             onClick={triggerMultiAgentDebate}
             disabled={isSwarmDebating}
-            className="bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white font-semibold text-xs gap-1.5 shadow-lg shadow-purple-600/30 transition-all"
+            className="bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white font-semibold text-xs gap-1.5 shadow-lg shadow-purple-600/30"
           >
             {isSwarmDebating ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Agen Sedang Memproses Task...</span>
+                <span>Agen Sedang Berdiskusi...</span>
               </>
             ) : (
               <>
@@ -719,357 +670,382 @@ export default function AgenticAIPage() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => handleSendCommand("Pindai kesehatan database dan seluruh modul ERP sekarang")}
-            className="border-cyan-500/40 bg-cyan-950/30 hover:bg-cyan-900/50 text-cyan-300 text-xs gap-1.5 shadow-sm"
+            onClick={() => setShowTerminal(!showTerminal)}
+            className="border-slate-700 bg-slate-900/90 text-slate-300 hover:text-white text-xs gap-1.5"
           >
-            <Zap className="h-3.5 w-3.5" />
-            <span>Full Swarm Scan</span>
+            <TerminalIcon className="h-3.5 w-3.5 text-cyan-400" />
+            <span>{showTerminal ? "Tutup Terminal" : "Buka Terminal"}</span>
           </Button>
         </div>
       </div>
 
-      {/* ⚡ 2. LIVE ACTIVE CONNECTION & DELEGATION RADAR BAR */}
-      {activeConnection && (
-        <div className="bg-gradient-to-r from-cyan-950/90 via-indigo-950/90 to-purple-950/90 border-b border-cyan-500/40 px-4 sm:px-8 py-2.5 flex items-center justify-between animate-in fade-in slide-in-from-top-2">
-          <div className="flex items-center gap-3 text-xs font-mono">
-            <span className="flex h-2.5 w-2.5 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500"></span>
-            </span>
-            <span className="text-slate-400">JALUR ALUR TUGAS AKTIF:</span>
-            
-            {/* Visual Animated Laser Pipeline */}
-            <div className="flex items-center gap-2 bg-slate-950/80 px-3 py-1 rounded-full border border-cyan-500/30 shadow-inner">
-              <span className="text-cyan-300 font-bold">{activeConnection.from}</span>
-              
-              {/* Glowing Arrow Line */}
-              <div className="flex items-center gap-1 text-cyan-400 px-1">
-                <span className="h-[2px] w-6 bg-gradient-to-r from-cyan-400 to-indigo-400 animate-pulse inline-block" />
-                <ArrowRight className="h-3.5 w-3.5 animate-pulse" />
-              </div>
-              
-              <span className="text-indigo-300 font-bold">{activeConnection.to}</span>
-            </div>
-          </div>
-
-          <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/40 text-[10px] font-mono animate-pulse">
-            DATA FLOW: {activeConnection.label}
-          </Badge>
-        </div>
-      )}
-
-      {/* 🤖 3. MAIN AGENTIC ARENA */}
-      <div className="flex-1 p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full">
+      {/* 🕸️ MAIN CANVAS AREA (INTERACTIVE NODE GRAPH WITH CURVED SVG LINES) */}
+      <div className="relative flex-1 w-full h-full overflow-hidden bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] bg-slate-950 flex items-center justify-center">
         
-        {/* LEFT COLUMN (COL-5): 3D ROBOT AVATAR & 6 AGENT SWARM NODES */}
-        <div className="lg:col-span-5 flex flex-col gap-6">
-          
-          {/* Main 3D Holographic Robot Display */}
-          <div className="relative rounded-3xl bg-gradient-to-b from-slate-900 via-slate-900/90 to-slate-950 border border-cyan-500/30 shadow-2xl shadow-cyan-950/40 overflow-hidden p-5">
-            <div className="flex items-center justify-between mb-3 relative z-10">
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
-                <span className="text-[11px] font-mono tracking-wider text-cyan-400 uppercase font-bold">
-                  AUTONOMOUS ROBOT COMMANDER
-                </span>
-              </div>
-              <div className="px-2.5 py-0.5 rounded-full bg-slate-800/80 border border-slate-700 text-[10px] font-mono text-emerald-400">
-                SWARM ONLINE
-              </div>
-            </div>
+        {/* Scalable & Zoomable Topology World */}
+        <div
+          className="relative w-[1000px] h-[700px] transition-transform duration-300 ease-out origin-center"
+          style={{
+            transform: `scale(${zoomLevel}) translate(${panOffset.x}px, ${panOffset.y}px)`
+          }}
+        >
+          {/* SVG LAYER: CURVED CONNECTING BEZIER LINES FROM CENTER TO EACH AGENT */}
+          <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
+            <defs>
+              <linearGradient id="activeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#06b6d4" />
+                <stop offset="50%" stopColor="#818cf8" />
+                <stop offset="100%" stopColor="#c084fc" />
+              </linearGradient>
 
-            {/* 3D Robot Image */}
-            <div className="relative w-full aspect-square max-w-[280px] mx-auto my-1 rounded-2xl overflow-hidden border border-cyan-500/40 bg-slate-950 flex items-center justify-center shadow-lg">
-              <Image
-                src="/assets/hermes_robot_avatar.jpg"
-                alt="Hermes AI Robot Avatar"
-                fill
-                priority
-                className={`object-cover object-center transition-all duration-700 ${
-                  currentSpeakingAgent ? "scale-105 brightness-110" : ""
-                }`}
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent pointer-events-none" />
+              {/* Glowing Laser Filter */}
+              <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feComposite in="SourceGraphic" in2="blur" operator="over" />
+              </filter>
+            </defs>
+
+            {nodes.map((node) => {
+              const isSpeaking = currentSpeakingAgent === node.id;
               
-              <div className="absolute bottom-3 left-3 right-3 p-2 rounded-xl bg-slate-950/85 backdrop-blur-md border border-slate-800 text-[11px] font-mono text-slate-300 flex items-center justify-between">
-                <span className="text-cyan-300 font-bold">HERMES ORCHESTRATOR</span>
-                <span className="text-emerald-400 flex items-center gap-1">
-                  <Flame className="h-3 w-3 text-amber-400 animate-pulse" /> Live Connected
-                </span>
+              // Calculate smooth Bezier curve from center hub to satellite node
+              const dx = (node.x - centerX) * 0.5;
+              const dy = (node.y - centerY) * 0.5;
+              const controlX1 = centerX + dx;
+              const controlY1 = centerY;
+              const controlX2 = centerX + dx;
+              const controlY2 = node.y;
+
+              const pathData = `M ${centerX} ${centerY} C ${controlX1} ${controlY1}, ${controlX2} ${controlY2}, ${node.x} ${node.y}`;
+
+              return (
+                <g key={`link-${node.id}`}>
+                  {/* Base Inactive/Idle Curve */}
+                  <path
+                    d={pathData}
+                    fill="none"
+                    stroke={isSpeaking ? "url(#activeGradient)" : "rgba(71, 85, 105, 0.35)"}
+                    strokeWidth={isSpeaking ? "3.5" : "1.5"}
+                    strokeDasharray={isSpeaking ? "8 6" : "none"}
+                    className={isSpeaking ? "animate-[dash_1.2s_linear_infinite]" : ""}
+                    filter={isSpeaking ? "url(#glow)" : undefined}
+                  />
+
+                  {/* Flowing Laser Pulse Particle on Active Connection */}
+                  {isSpeaking && (
+                    <circle r="4.5" fill="#22d3ee" filter="url(#glow)">
+                      <animateMotion path={pathData} dur="1.2s" repeatCount="indefinite" />
+                    </circle>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+
+          {/* 🤖 CENTER HUB: 3D ROBOT AVATAR CORE (HERMES ORCHESTRATOR) */}
+          <div
+            className="absolute -translate-x-1/2 -translate-y-1/2 z-10 cursor-pointer group"
+            style={{ left: `${centerX}px`, top: `${centerY}px` }}
+            onClick={() => setSelectedNode(null)}
+          >
+            {/* Ambient Background Aura Rings */}
+            <div className="absolute -inset-6 rounded-full bg-cyan-500/10 blur-xl animate-pulse pointer-events-none" />
+            <div className="absolute -inset-2 rounded-full border border-cyan-500/30 animate-spin [animation-duration:15s] pointer-events-none" />
+
+            <div className="relative w-28 h-28 rounded-2xl p-1 bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 shadow-2xl shadow-cyan-500/30">
+              <div className="w-full h-full bg-slate-950 rounded-[14px] overflow-hidden relative border border-cyan-400/40 flex items-center justify-center">
+                <Image
+                  src="/assets/hermes_robot_avatar.jpg"
+                  alt="Hermes AI Robot"
+                  fill
+                  priority
+                  className="object-cover object-center group-hover:scale-110 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent pointer-events-none" />
+                <div className="absolute bottom-1 px-2 py-0.5 rounded-full bg-slate-950/90 border border-cyan-500/40 text-[9px] font-mono text-cyan-300 font-bold">
+                  HERMES
+                </div>
               </div>
             </div>
           </div>
 
-          {/* 6 CONNECTED SUB-AGENT NODES WITH REAL-TIME TASK STATUS & CONNECTING LINES */}
-          <div className="rounded-3xl bg-slate-900/70 border border-slate-800/90 p-5 space-y-3 relative">
-            
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <Network className="h-3.5 w-3.5 text-cyan-400" />
-                <span>6 Agen Divisi & Status Task</span>
-              </h3>
-              <span className="text-[10px] font-mono text-slate-400">
-                Status Real-time
-              </span>
-            </div>
+          {/* 🛰️ 6 SURROUNDING SATELLITE NODES (MINDMAP CARDS) */}
+          {nodes.map((node) => {
+            const isSpeaking = currentSpeakingAgent === node.id;
+            const isSelected = selectedNode?.id === node.id;
+            const IconComp = node.icon;
 
-            <div className="grid grid-cols-2 gap-3 relative">
-              {agentSwarm.map((ag, idx) => {
-                const IconComp = ag.icon;
-                const isSpeaking = currentSpeakingAgent === ag.id;
-                const isSelected = filterAgent.toLowerCase().includes(ag.id);
-                const isExecuting = ag.status !== "IDLE";
-
-                return (
-                  <div
-                    key={ag.id}
-                    onClick={() => setFilterAgent(isSelected ? "ALL" : ag.role)}
-                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden ${
-                      isSpeaking
-                        ? ag.activeBorder + " " + ag.activeGlow
-                        : ag.borderColor + " " + ag.bgGlow
-                    } ${isSelected ? "ring-2 ring-white" : ""}`}
-                  >
-                    {/* Active Status Ribbon */}
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-base">{ag.avatarIcon}</span>
-                        <h4 className="font-bold text-xs text-slate-100">{ag.name}</h4>
-                      </div>
-
-                      {/* Status Badge */}
-                      <span
-                        className={`text-[9px] font-mono px-2 py-0.5 rounded-full font-bold transition-all ${
-                          isSpeaking
-                            ? "bg-cyan-500 text-slate-950 animate-pulse"
-                            : isExecuting
-                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                            : "bg-slate-950/80 text-slate-400 border border-slate-800"
-                        }`}
-                      >
-                        {isSpeaking ? "ACTIVE" : ag.status}
-                      </span>
-                    </div>
-
-                    <p className="text-[10px] text-slate-400 leading-tight truncate">{ag.division}</p>
-
-                    <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
-                      <span className="text-slate-500">Selesai:</span>
-                      <span className="text-cyan-300 font-bold">{ag.tasksCompleted} task</span>
-                    </div>
-
-                    {/* Animated Connection Pulse Dot */}
-                    {isSpeaking && (
-                      <span className="absolute top-2 right-2 flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
-                      </span>
-                    )}
+            return (
+              <div
+                key={node.id}
+                onClick={() => setSelectedNode(node)}
+                className={`absolute -translate-x-1/2 -translate-y-1/2 z-10 cursor-pointer transition-all duration-300 ${
+                  isSpeaking
+                    ? "scale-110 z-20"
+                    : "hover:scale-105"
+                }`}
+                style={{ left: `${node.x}px`, top: `${node.y}px` }}
+              >
+                <div
+                  className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-slate-900/95 backdrop-blur-xl border transition-all shadow-2xl ${
+                    isSpeaking
+                      ? node.activeBorder + " bg-slate-900"
+                      : isSelected
+                      ? "border-white ring-2 ring-white/50 bg-slate-800"
+                      : node.colorBorder + " bg-slate-900/90"
+                  }`}
+                >
+                  {/* Node Icon Box */}
+                  <div className="p-2 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-center text-lg">
+                    <span>{node.avatarIcon}</span>
                   </div>
-                );
-              })}
-            </div>
-          </div>
+
+                  {/* Node Info */}
+                  <div className="text-left">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-xs text-slate-100">{node.name}</h4>
+                      {isSpeaking && (
+                        <span className="flex h-2 w-2 relative">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-mono">{node.division}</p>
+                  </div>
+
+                  {/* Task Counter Badge */}
+                  <div className="ml-2 pl-2 border-l border-slate-800 text-[10px] font-mono text-cyan-300">
+                    <span className="font-bold">{node.tasksCompleted}</span>
+                    <span className="text-[8px] text-slate-500 block">runs</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
 
         </div>
 
-        {/* RIGHT COLUMN (COL-7): TABBED MULTI-AGENT CHAT & TASK LEDGER */}
-        <div className="lg:col-span-7 flex flex-col rounded-3xl bg-slate-900/80 border border-slate-800/90 shadow-2xl overflow-hidden min-h-[660px]">
+        {/* 🔍 BOTTOM-LEFT ZOOM & CANVAS CONTROLS (MIRIP SCREENSHOT) */}
+        <div className="absolute bottom-6 left-6 z-20 flex flex-col gap-1.5 bg-slate-900/80 backdrop-blur-md p-1.5 rounded-xl border border-slate-800 shadow-xl">
+          <button
+            onClick={() => setZoomLevel((z) => Math.min(z + 0.15, 1.6))}
+            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            title="Zoom In"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setZoomLevel((z) => Math.max(z - 0.15, 0.6))}
+            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            title="Zoom Out"
+          >
+            <Minus className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => {
+              setZoomLevel(1);
+              setPanOffset({ x: 0, y: 0 });
+            }}
+            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            title="Reset View"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        {/* ℹ️ SELECTED NODE INSPECTOR DRAWER */}
+        {selectedNode && (
+          <div className="absolute top-20 right-6 z-20 w-80 rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-slate-800 shadow-2xl p-4 animate-in fade-in slide-in-from-right-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">{selectedNode.avatarIcon}</span>
+                <div>
+                  <h3 className="font-bold text-xs text-slate-100">{selectedNode.name}</h3>
+                  <p className="text-[10px] font-mono text-cyan-400">{selectedNode.role}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedNode(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="text-xs space-y-2">
+              <div>
+                <span className="text-[10px] text-slate-500 font-mono uppercase">Tanggung Jawab Otonom:</span>
+                <p className="text-slate-300 text-xs mt-0.5">{selectedNode.duty}</p>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] font-mono">
+                <span className="text-slate-400">Total Eksekusi:</span>
+                <span className="text-emerald-400 font-bold">{selectedNode.tasksCompleted} Task Selesai</span>
+              </div>
+            </div>
+
+            <Button
+              size="sm"
+              onClick={() => {
+                setInputText(`Tanyakan status detail operasional divisi ${selectedNode.division}`);
+                setShowTerminal(true);
+              }}
+              className="w-full bg-cyan-600 hover:bg-cyan-500 text-white text-xs gap-1.5"
+            >
+              <Send className="h-3.5 w-3.5" />
+              <span>Beri Perintah Khusus Agen Ini</span>
+            </Button>
+          </div>
+        )}
+
+      </div>
+
+      {/* 💬 BOTTOM COLLAPSIBLE CHAT TERMINAL & TASK LEDGER DRAWER */}
+      {showTerminal && (
+        <div className="relative z-20 h-72 border-t border-slate-800/90 bg-slate-900/95 backdrop-blur-xl flex flex-col shadow-2xl animate-in slide-in-from-bottom-6">
           
-          {/* Top Switcher Tabs (Chat Antar-Agen vs Log Task Selesai) */}
-          <div className="px-5 py-3 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between">
+          {/* Drawer Switcher Tabs */}
+          <div className="px-5 py-2.5 border-b border-slate-800/80 bg-slate-950/80 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setActiveTab("SWARM_CHAT")}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold font-mono flex items-center gap-2 transition-all ${
-                  activeTab === "SWARM_CHAT"
-                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                onClick={() => setTerminalTab("SWARM_CHAT")}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold font-mono flex items-center gap-1.5 transition-all ${
+                  terminalTab === "SWARM_CHAT"
+                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+                    : "text-slate-400 hover:text-slate-200"
                 }`}
               >
                 <MessageSquareShare className="h-3.5 w-3.5" />
-                <span>Obrolan Antar-Agen</span>
+                <span>Obrolan Antar-Node Agen</span>
               </button>
 
               <button
-                onClick={() => setActiveTab("TASK_LEDGER")}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold font-mono flex items-center gap-2 transition-all ${
-                  activeTab === "TASK_LEDGER"
-                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                onClick={() => setTerminalTab("TASK_LEDGER")}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold font-mono flex items-center gap-1.5 transition-all ${
+                  terminalTab === "TASK_LEDGER"
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                    : "text-slate-400 hover:text-slate-200"
                 }`}
               >
                 <ListTodo className="h-3.5 w-3.5" />
-                <span>Task Selesai Dikerjakan ({completedTasks.length})</span>
+                <span>Task Ledger Selesai ({completedTasks.length})</span>
               </button>
             </div>
 
-            {filterAgent !== "ALL" && (
-              <button
-                onClick={() => setFilterAgent("ALL")}
-                className="text-[10px] font-mono text-cyan-400 underline hover:text-cyan-300"
-              >
-                Reset Filter
-              </button>
-            )}
+            <button
+              onClick={() => setShowTerminal(false)}
+              className="p-1 text-slate-400 hover:text-white"
+              title="Minimize Terminal"
+            >
+              <Minimize2 className="h-4 w-4" />
+            </button>
           </div>
 
-          {/* VIEW 1: MULTI-AGENT CONVERSATIONAL STREAM */}
-          {activeTab === "SWARM_CHAT" && (
-            <div className="flex-1 flex flex-col justify-between">
-              
-              {/* Chat Scroll Area */}
-              <div className="flex-1 p-5 overflow-y-auto space-y-4 max-h-[500px]">
-                {filteredMessages.map((msg) => {
+          {/* TAB 1: SWARM CHAT STREAM */}
+          {terminalTab === "SWARM_CHAT" && (
+            <div className="flex-1 flex flex-col justify-between overflow-hidden">
+              <div className="flex-1 p-4 overflow-y-auto space-y-3">
+                {messages.map((msg) => {
                   const isUser = msg.senderRole === "OPERATOR";
                   return (
                     <div
                       key={msg.id}
-                      className={`flex gap-3.5 ${isUser ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2`}
+                      className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"} animate-in fade-in`}
                     >
                       {!isUser && (
-                        <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 p-0.5 shrink-0 shadow-md shadow-cyan-500/20">
-                          <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center text-sm">
-                            {msg.avatarIcon || "🤖"}
-                          </div>
+                        <div className="h-7 w-7 rounded-lg bg-gradient-to-tr from-cyan-500 to-indigo-600 p-0.5 shrink-0 flex items-center justify-center text-xs">
+                          {msg.avatarIcon || "🤖"}
                         </div>
                       )}
 
-                      <div className={`max-w-[85%] space-y-1.5 ${isUser ? "items-end text-right" : "items-start"}`}>
-                        <div className="flex items-center gap-2 text-[11px] font-mono">
-                          <span className={`font-bold ${isUser ? "text-cyan-400 ml-auto" : "text-slate-200"}`}>
+                      <div className={`max-w-[80%] space-y-1 ${isUser ? "items-end text-right" : "items-start"}`}>
+                        <div className="flex items-center gap-2 text-[10px] font-mono">
+                          <span className={`font-bold ${isUser ? "text-cyan-400 ml-auto" : "text-slate-300"}`}>
                             {msg.senderName}
                           </span>
-                          {msg.division && (
-                            <span className="text-[10px] text-cyan-400/80 bg-cyan-500/10 px-1.5 py-0.2 rounded border border-cyan-500/20">
-                              {msg.division}
-                            </span>
-                          )}
-                          <span className="text-slate-500 text-[10px]">{msg.timestamp}</span>
+                          <span className="text-slate-500">{msg.timestamp}</span>
                         </div>
 
                         <div
-                          className={`p-4 rounded-2xl text-xs sm:text-sm leading-relaxed ${
+                          className={`p-3 rounded-xl text-xs leading-relaxed ${
                             isUser
-                              ? "bg-indigo-600 text-white rounded-tr-none shadow-md shadow-indigo-600/30"
-                              : "bg-slate-950/90 text-slate-200 border border-slate-800 rounded-tl-none shadow-md"
+                              ? "bg-indigo-600 text-white rounded-tr-none"
+                              : "bg-slate-950 text-slate-200 border border-slate-800 rounded-tl-none"
                           }`}
                         >
                           <p className="whitespace-pre-line">{msg.message}</p>
-
                           {msg.targetAgent && (
-                            <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] font-mono text-purple-300 flex items-center gap-1.5">
-                              <MessageSquareShare className="h-3 w-3 text-purple-400" />
-                              <span>Mendelegasikan data ke: <strong className="text-cyan-300">{msg.targetAgent}</strong></span>
-                            </div>
+                            <p className="mt-1.5 text-[10px] text-cyan-400 font-mono">
+                              ↳ Transmisi Data ke: <strong>{msg.targetAgent}</strong>
+                            </p>
                           )}
                         </div>
                       </div>
                     </div>
                   );
                 })}
-
-                {isProcessing && (
-                  <div className="flex gap-3 items-center text-xs font-mono text-cyan-400 p-3 rounded-2xl bg-cyan-950/20 border border-cyan-500/20 animate-pulse">
-                    <Loader2 className="h-4 w-4 animate-spin text-cyan-400" />
-                    <span>Hermes Swarm sedang bernalar & mengeksekusi ke database ERP...</span>
-                  </div>
-                )}
                 <div ref={chatEndRef} />
               </div>
 
-              {/* Terminal Input Box */}
-              <div className="p-4 bg-slate-950 border-t border-slate-800">
+              {/* Chat Input */}
+              <div className="p-3 bg-slate-950 border-t border-slate-800/80">
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
                     handleSendCommand();
                   }}
-                  className="flex items-center gap-3"
+                  className="flex items-center gap-2"
                 >
                   <input
                     type="text"
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
-                    placeholder="Beri perintah atau minta agen berkoordinasi..."
+                    placeholder="Beri instruksi pada Hermes Swarm Node..."
                     disabled={isProcessing}
-                    className="w-full h-11 pl-4 pr-4 rounded-2xl border border-slate-800 bg-slate-900 text-slate-100 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition-all font-sans"
+                    className="w-full h-9 pl-3 pr-3 rounded-xl border border-slate-800 bg-slate-900 text-slate-100 text-xs focus:outline-none focus:border-cyan-500"
                   />
-
                   <Button
                     type="submit"
                     disabled={!inputText.trim() || isProcessing}
-                    className="h-11 px-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-semibold text-xs shadow-lg shadow-cyan-500/25 transition-all duration-200 gap-2 shrink-0"
+                    className="h-9 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs gap-1.5 shrink-0"
                   >
-                    {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                    {isProcessing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                   </Button>
                 </form>
               </div>
-
             </div>
           )}
 
-          {/* VIEW 2: TASK EXECUTION LEDGER */}
-          {activeTab === "TASK_LEDGER" && (
-            <div className="flex-1 p-5 overflow-y-auto space-y-3 max-h-[580px]">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-mono text-slate-400">
-                  Riwayat Audit & Transaksi yang Telah Dieksekusi Otomatis oleh Swarm:
-                </span>
-                <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px] font-mono">
-                  100% ACID COMPLIANT
-                </Badge>
-              </div>
-
+          {/* TAB 2: TASK LEDGER */}
+          {terminalTab === "TASK_LEDGER" && (
+            <div className="flex-1 p-4 overflow-y-auto space-y-2">
               {completedTasks.length === 0 ? (
-                <div className="py-16 text-center text-slate-500 space-y-3">
-                  <div className="h-12 w-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-400">
-                    <Inbox className="h-6 w-6" />
-                  </div>
-                  <p className="text-xs font-mono">Belum ada riwayat task yang dieksekusi.</p>
-                  <p className="text-[11px] text-slate-600">
-                    Klik tombol <strong>&apos;Mulai Obrolan Antar-Agen&apos;</strong> atau kirim perintah untuk mengeksekusi task ke database.
-                  </p>
+                <div className="py-10 text-center text-slate-500 text-xs font-mono">
+                  Belum ada task yang dieksekusi. Klik &apos;Mulai Obrolan Antar-Agen&apos; untuk memulai.
                 </div>
               ) : (
                 completedTasks.map((task) => (
                   <div
                     key={task.id}
-                    className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 hover:border-slate-700 transition-all space-y-2 animate-in fade-in"
+                    className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs font-mono"
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                    <div className="space-y-0.5">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono font-bold text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/40">
-                          {task.id}
-                        </span>
-                        <h4 className="text-xs sm:text-sm font-bold text-slate-100">{task.taskTitle}</h4>
+                        <span className="font-bold text-cyan-400">{task.id}</span>
+                        <span className="text-slate-200 font-semibold">{task.taskTitle}</span>
                       </div>
-
-                      <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400">
-                        <Clock className="h-3 w-3 text-slate-500" />
-                        <span>{task.timestamp}</span>
-                        <span className="text-emerald-400 font-semibold">({task.executionTime})</span>
-                      </div>
+                      <p className="text-[10px] text-slate-500">
+                        {task.agentName} • Schema: {task.targetSchema}
+                      </p>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-mono text-slate-300">
-                          Eksekutor: <strong className="text-indigo-400">{task.agentName}</strong>
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-500">
-                          Schema: <code className="text-slate-400">{task.targetSchema}</code>
-                        </span>
-                      </div>
-
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                        <ShieldCheck className="h-3 w-3" /> {task.status}
+                    <div className="text-right">
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 text-[10px] border border-emerald-500/30">
+                        {task.status}
                       </span>
+                      <span className="block text-[9px] text-slate-500 mt-0.5">({task.executionTime})</span>
                     </div>
-
-                    <p className="text-[11px] text-slate-400 bg-slate-900/60 p-2 rounded-xl border border-slate-800/60 font-mono">
-                      💡 <strong>Dampak Operasional:</strong> {task.impactNote}
-                    </p>
                   </div>
                 ))
               )}
@@ -1077,8 +1053,7 @@ export default function AgenticAIPage() {
           )}
 
         </div>
-
-      </div>
+      )}
 
     </div>
   );
