@@ -14,15 +14,29 @@ interface TopNavbarProps {
 }
 
 export function TopNavbar({ onOpenMobileMenu }: TopNavbarProps) {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true);
 
-  const toggleDarkMode = () => {
-    if (isDarkMode) {
+  React.useEffect(() => {
+    const savedTheme = localStorage.getItem("erp_theme");
+    if (savedTheme === "light") {
       document.documentElement.classList.remove("dark");
       setIsDarkMode(false);
     } else {
       document.documentElement.classList.add("dark");
       setIsDarkMode(true);
+      localStorage.setItem("erp_theme", "dark");
+    }
+  }, []);
+
+  const toggleDarkMode = () => {
+    if (isDarkMode) {
+      document.documentElement.classList.remove("dark");
+      setIsDarkMode(false);
+      localStorage.setItem("erp_theme", "light");
+    } else {
+      document.documentElement.classList.add("dark");
+      setIsDarkMode(true);
+      localStorage.setItem("erp_theme", "dark");
     }
   };
 
