@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"erp-backend/internal/agent"
 	"erp-backend/internal/auth"
 	"erp-backend/internal/finance"
 	"erp-backend/internal/hr"
@@ -23,6 +24,7 @@ import (
 	"erp-backend/pkg/response"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -228,16 +230,69 @@ func main() {
 			  AND (p.module = 'finance' OR p.code = 'sales:invoices:read')
 			ON CONFLICT DO NOTHING;`,
 
+			`INSERT INTO auth.permissions (code, module, description) VALUES
+				('auth:users:read', 'auth', 'View users list and details'),
+				('auth:users:create', 'auth', 'Create new users'),
+				('auth:users:update', 'auth', 'Update existing users'),
+				('auth:users:delete', 'auth', 'Delete or deactivate users'),
+				('auth:roles:manage', 'auth', 'Manage roles and assign permissions'),
+				('inventory:products:read', 'inventory', 'View products and stock levels'),
+				('inventory:products:create', 'inventory', 'Create new products'),
+				('inventory:products:update', 'inventory', 'Update product details and prices'),
+				('inventory:products:delete', 'inventory', 'Delete products'),
+				('inventory:stock:mutate', 'inventory', 'Perform stock in/out/transfer/opname'),
+				('inventory:warehouses:manage', 'inventory', 'Manage warehouses master'),
+				('sales:customers:read', 'sales', 'View customer list'),
+				('sales:customers:create', 'sales', 'Create new customer'),
+				('sales:customers:update', 'sales', 'Update customer details'),
+				('sales:orders:read', 'sales', 'View sales orders'),
+				('sales:orders:create', 'sales', 'Create sales order'),
+				('sales:orders:confirm', 'sales', 'Confirm sales order'),
+				('sales:invoices:manage', 'sales', 'Create and manage sales invoices & payments'),
+				('purchasing:suppliers:manage', 'purchasing', 'Manage vendor and suppliers'),
+				('purchasing:pr:create', 'purchasing', 'Create purchase request'),
+				('purchasing:pr:approve', 'purchasing', 'Approve or reject purchase request'),
+				('purchasing:po:create', 'purchasing', 'Create purchase order'),
+				('purchasing:po:approve', 'purchasing', 'Approve purchase order'),
+				('purchasing:grn:create', 'purchasing', 'Receive goods in warehouse (GRN)'),
+				('finance:coa:manage', 'finance', 'Manage chart of accounts'),
+				('finance:journals:read', 'finance', 'View general journals and ledgers'),
+				('finance:journals:create', 'finance', 'Create manual journal entry'),
+				('finance:reports:view', 'finance', 'View balance sheet, profit & loss, cash flow'),
+				('hr:employees:manage', 'hr', 'Manage employee profiles, contracts, positions'),
+				('hr:attendance:manage', 'hr', 'Record and manage employee attendances'),
+				('hr:leaves:manage', 'hr', 'Approve or reject employee leave requests'),
+				('hr:payroll:process', 'hr', 'Calculate and disburse payroll'),
+				('audit:logs:view', 'audit', 'View system audit logs'),
+				('reports:dashboard:view', 'reporting', 'View executive cross-module dashboard')
+			ON CONFLICT (code) DO NOTHING;`,
+
 			`INSERT INTO auth.role_permissions (role_id, permission_id)
-			SELECT r.id, p.id
-			FROM auth.roles r
-			CROSS JOIN auth.permissions p
-			WHERE r.code = 'STAFF_HR'
-			  AND p.module = 'hr'
+			SELECT '11111111-1111-1111-1111-111111111111'::uuid, id
+			FROM auth.permissions
 			ON CONFLICT DO NOTHING;`,
 		}
 		for _, q := range syncSQLs {
 			_ = db.Exec(q).Error
+		}
+
+		// Ensure Super Admin User (admin@erp.local / admin123) is created and active
+		if hash, err := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost); err == nil {
+			const adminID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+			_ = db.Exec(`
+				INSERT INTO auth.users (id, email, password_hash, full_name, phone, is_active)
+				VALUES (?::uuid, 'admin@erp.local', ?, 'Super Administrator', '+6281234567890', TRUE)
+				ON CONFLICT (email) DO UPDATE 
+				SET password_hash = EXCLUDED.password_hash, is_active = TRUE;
+			`, adminID, string(hash)).Error
+
+			_ = db.Exec(`
+				INSERT INTO auth.user_roles (user_id, role_id)
+				VALUES (?::uuid, '11111111-1111-1111-1111-111111111111'::uuid)
+				ON CONFLICT DO NOTHING;
+			`, adminID).Error
+
+			log.Println("[AUTH INIT] Super Administrator (admin@erp.local / admin123) is verified and ready")
 		}
 	}
 
@@ -303,6 +358,18 @@ func main() {
 			hrService := hr.NewService(hrRepo)
 			hrHandler := hr.NewHandler(hrService)
 			hrHandler.RegisterRoutes(apiV1, authMiddleware, requirePerm)
+
+			// 7. Agentic AI Automation Module
+			agentService := agent.NewAgentService(db.DB, invService, purchService, salesService, finService, hrService)
+			agentHandler := agent.NewHandler(agentService)
+			agentRoutes := apiV1.Group("/agent")
+			agentRoutes.Use(authMiddleware)
+			{
+				agentRoutes.POST("/command", agentHandler.ExecuteCommand)
+				agentRoutes.POST("/procurement/auto-replenish", agentHandler.AutoReplenish)
+				agentRoutes.GET("/inventory/scan", agentHandler.ScanInventory)
+				agentRoutes.GET("/audit/anomalies", agentHandler.AuditAnomalies)
+			}
 		}
 	}
 
