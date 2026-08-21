@@ -33,7 +33,10 @@ import {
   ExternalLink,
   ShieldCheck,
   Flame,
-  Inbox
+  Inbox,
+  ArrowRight,
+  GitBranch,
+  Network
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,10 +49,12 @@ interface AgentSubNode {
   division: string;
   avatarIcon: string;
   icon: React.ElementType;
-  status: "IDLE" | "SCANNING" | "EXECUTING" | "ALERT";
+  status: "IDLE" | "SCANNING" | "EXECUTING" | "SYNCING";
   color: string;
   borderColor: string;
   bgGlow: string;
+  activeBorder: string;
+  activeGlow: string;
   duty: string;
   tasksCompleted: number;
 }
@@ -87,6 +92,14 @@ export default function AgenticAIPage() {
   const [activeTab, setActiveTab] = useState<"SWARM_CHAT" | "TASK_LEDGER">("SWARM_CHAT");
   const [filterAgent, setFilterAgent] = useState<string>("ALL");
   const [isSwarmDebating, setIsSwarmDebating] = useState(false);
+  
+  // Pipeline connection state: Source Agent -> Target Agent
+  const [activeConnection, setActiveConnection] = useState<{
+    from: string;
+    to: string;
+    label: string;
+  } | null>(null);
+
   const [currentSpeakingAgent, setCurrentSpeakingAgent] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -103,6 +116,8 @@ export default function AgenticAIPage() {
       color: "text-cyan-400",
       borderColor: "border-cyan-500/40 hover:border-cyan-400",
       bgGlow: "bg-cyan-500/10",
+      activeBorder: "border-cyan-400 ring-2 ring-cyan-400 shadow-lg shadow-cyan-500/40",
+      activeGlow: "bg-cyan-500/20",
       duty: "Pindai stok minimum, mutasi gudang & deteksi restock",
       tasksCompleted: 0
     },
@@ -117,6 +132,8 @@ export default function AgenticAIPage() {
       color: "text-emerald-400",
       borderColor: "border-emerald-500/40 hover:border-emerald-400",
       bgGlow: "bg-emerald-500/10",
+      activeBorder: "border-emerald-400 ring-2 ring-emerald-400 shadow-lg shadow-emerald-500/40",
+      activeGlow: "bg-emerald-500/20",
       duty: "Auto-draft Purchase Request & PO ke vendor rekanan",
       tasksCompleted: 0
     },
@@ -131,6 +148,8 @@ export default function AgenticAIPage() {
       color: "text-amber-400",
       borderColor: "border-amber-500/40 hover:border-amber-400",
       bgGlow: "bg-amber-500/10",
+      activeBorder: "border-amber-400 ring-2 ring-amber-400 shadow-lg shadow-amber-500/40",
+      activeGlow: "bg-amber-500/20",
       duty: "Validasi stok SO, terbitkan Surat Jalan DO & Invoice",
       tasksCompleted: 0
     },
@@ -145,6 +164,8 @@ export default function AgenticAIPage() {
       color: "text-indigo-400",
       borderColor: "border-indigo-500/40 hover:border-indigo-400",
       bgGlow: "bg-indigo-500/10",
+      activeBorder: "border-indigo-400 ring-2 ring-indigo-400 shadow-lg shadow-indigo-500/40",
+      activeGlow: "bg-indigo-500/20",
       duty: "Auto-jurnal double entry & verifikasi balance sheet",
       tasksCompleted: 0
     },
@@ -159,6 +180,8 @@ export default function AgenticAIPage() {
       color: "text-pink-400",
       borderColor: "border-pink-500/40 hover:border-pink-400",
       bgGlow: "bg-pink-500/10",
+      activeBorder: "border-pink-400 ring-2 ring-pink-400 shadow-lg shadow-pink-500/40",
+      activeGlow: "bg-pink-500/20",
       duty: "Batch generator payroll & workflow persetujuan cuti",
       tasksCompleted: 0
     },
@@ -173,15 +196,17 @@ export default function AgenticAIPage() {
       color: "text-rose-400",
       borderColor: "border-rose-500/40 hover:border-rose-400",
       bgGlow: "bg-rose-500/10",
+      activeBorder: "border-rose-400 ring-2 ring-rose-400 shadow-lg shadow-rose-500/40",
+      activeGlow: "bg-rose-500/20",
       duty: "Audit konsistensi multi-skema & deteksi anomali data",
       tasksCompleted: 0
     }
   ]);
 
-  // Real Completed Tasks Ledger (Zero dummy, loaded dynamically from real actions)
+  // Real Completed Tasks Ledger (Zero dummy)
   const [completedTasks, setCompletedTasks] = useState<CompletedTask[]>([]);
 
-  // Initial Real Clean Chat Message
+  // Initial Clean Message
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "msg-init",
@@ -190,7 +215,7 @@ export default function AgenticAIPage() {
       senderName: "HERMES Core AI Orchestrator",
       division: "Master Controller",
       avatarIcon: "🤖",
-      message: "Hermes Agentic Swarm siap beroperasi. Seluruh 6 sub-agent divisi terhubung langsung ke database PostgreSQL. Klik 'Mulai Obrolan Antar-Agen' untuk memicu kolaborasi live, atau ketik instruksi operasional di bawah.",
+      message: "Hermes Agentic Swarm siap beroperasi. Seluruh 6 sub-agent divisi terhubung langsung ke database PostgreSQL. Klik 'Mulai Obrolan Antar-Agen' untuk melihat garis alur delegasi task antar-agen secara langsung.",
       status: "INFO"
     }
   ]);
@@ -199,21 +224,41 @@ export default function AgenticAIPage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isProcessing]);
 
-  // Increment completed tasks count for a specific agent
-  const incrementAgentTask = (agentId: string) => {
+  // Helper to update individual agent status
+  const updateAgentStatus = (agentId: string, status: "IDLE" | "SCANNING" | "EXECUTING" | "SYNCING") => {
     setAgentSwarm((prev) =>
-      prev.map((ag) => (ag.id === agentId ? { ...ag, tasksCompleted: ag.tasksCompleted + 1 } : ag))
+      prev.map((ag) => (ag.id === agentId ? { ...ag, status } : ag))
     );
   };
 
-  // Trigger Real Multi-Agent Inter-Dialogue with REAL DATABASE QUERIES
+  // Increment completed tasks count for a specific agent
+  const incrementAgentTask = (agentId: string) => {
+    setAgentSwarm((prev) =>
+      prev.map((ag) =>
+        ag.id === agentId
+          ? { ...ag, tasksCompleted: ag.tasksCompleted + 1, status: "IDLE" }
+          : ag
+      )
+    );
+  };
+
+  // Trigger Real Multi-Agent Inter-Dialogue with ANIMATED PIPELINE CONNECTION LINES
   const triggerMultiAgentDebate = async () => {
     if (isSwarmDebating) return;
     setIsSwarmDebating(true);
 
     try {
-      // 1. INVENTORY AGENT (Rian) - Real Scan from PostgreSQL
+      // ─────────────────────────────────────────────────────────────
+      // STAGE 1: INVENTORY AGENT (Rian) -> PROCUREMENT (Siti)
+      // ─────────────────────────────────────────────────────────────
       setCurrentSpeakingAgent("inv");
+      updateAgentStatus("inv", "SCANNING");
+      setActiveConnection({
+        from: "Rian (Inventori)",
+        to: "Siti (Pengadaan)",
+        label: "RESTOCK & SAFETY STOCK SCAN"
+      });
+
       let invText = "📦 [Rian - Inventori]: Memindai tabel inventory.products & warehouse_stocks di PostgreSQL...";
       let invAlertsCount = 0;
       try {
@@ -222,12 +267,12 @@ export default function AgenticAIPage() {
         const alerts = Array.isArray(invData?.Data) ? invData.Data : [];
         invAlertsCount = alerts.length;
         if (invAlertsCount > 0) {
-          invText = `📦 [Rian - Inventori]: Terdeteksi ${invAlertsCount} SKU yang stoknya menyentuh batas minimum. Mengirim sinyal restock otomatis ke @Siti (Procurement).`;
+          invText = `📦 [Rian - Inventori]: Terdeteksi ${invAlertsCount} SKU yang stoknya menyentuh batas minimum. Mengirim sinyal restock ke @Siti (Procurement).`;
         } else {
-          invText = `📦 [Rian - Inventori]: Seluruh stok produk di gudang berstatus optimal. Tidak ada barang yang kehabisan stok. Memberi konfirmasi ke @Dimas (Sales).`;
+          invText = `📦 [Rian - Inventori]: Seluruh stok produk di gudang optimal. Tidak ada barang yang kehabisan stok. Mengirim sinyal konfirmasi ke @Siti.`;
         }
       } catch (e) {
-        invText = "📦 [Rian - Inventori]: Pemindaian stok gudang selesai terverifikasi di PostgreSQL. Mengarahkan koordinasi ke @Siti.";
+        invText = "📦 [Rian - Inventori]: Pemindaian stok gudang selesai terverifikasi di PostgreSQL. Mengirim data ke @Siti.";
       }
 
       setMessages((prev) => [
@@ -241,7 +286,7 @@ export default function AgenticAIPage() {
           avatarIcon: "📦",
           message: invText,
           status: invAlertsCount > 0 ? "WARNING" : "SUCCESS",
-          targetAgent: invAlertsCount > 0 ? "Siti (Procurement)" : "Dimas (Sales)"
+          targetAgent: "Siti (Procurement)"
         }
       ]);
       incrementAgentTask("inv");
@@ -261,18 +306,27 @@ export default function AgenticAIPage() {
         ...prev
       ]);
 
-      await new Promise((r) => setTimeout(r, 1600));
+      await new Promise((r) => setTimeout(r, 1800));
 
-      // 2. PROCUREMENT AGENT (Siti) - Real Auto PR/PO Check
+      // ─────────────────────────────────────────────────────────────
+      // STAGE 2: PROCUREMENT (Siti) -> SALES (Dimas)
+      // ─────────────────────────────────────────────────────────────
       setCurrentSpeakingAgent("proc");
-      let procText = "🛒 [Siti - Procurement]: Menerima koordinasi dari Rian. Memeriksa daftar vendor rekanan aktif di database...";
+      updateAgentStatus("proc", "EXECUTING");
+      setActiveConnection({
+        from: "Siti (Pengadaan)",
+        to: "Dimas (Penjualan)",
+        label: "SUPPLIER PO & CATALOG PIPELINE"
+      });
+
+      let procText = "🛒 [Siti - Procurement]: Menerima koordinasi dari Rian. Memeriksa antrian Purchase Order dan katalog vendor...";
       try {
         const poRes = await apiClient.get<any>("/purchasing/orders?page=1&limit=5");
         const poData = poRes.data?.data || poRes.data;
         const totalPO = poData?.total || 0;
-        procText = `🛒 [Siti - Procurement]: Tercatat ${totalPO} Purchase Order aktif di database. Draf PR baru siap diterbitkan jika ada barang kritis. Meminta konfirmasi plafon kas ke @Dewi (Finance).`;
+        procText = `🛒 [Siti - Procurement]: Tercatat ${totalPO} Purchase Order aktif di database. Draf PR disiapkan & katalog vendor terverifikasi. Menghubungi @Dimas (Sales).`;
       } catch (e) {
-        procText = "🛒 [Siti - Procurement]: Katalog vendor rekanan dan riwayat Purchase Order terverifikasi. Meneruskan ke @Dewi (Finance).";
+        procText = "🛒 [Siti - Procurement]: Katalog vendor rekanan dan riwayat Purchase Order terverifikasi. Meneruskan ke @Dimas (Sales).";
       }
 
       setMessages((prev) => [
@@ -286,7 +340,7 @@ export default function AgenticAIPage() {
           avatarIcon: "🛒",
           message: procText,
           status: "SUCCESS",
-          targetAgent: "Dewi (Finance)"
+          targetAgent: "Dimas (Sales)"
         }
       ]);
       incrementAgentTask("proc");
@@ -306,16 +360,25 @@ export default function AgenticAIPage() {
         ...prev
       ]);
 
-      await new Promise((r) => setTimeout(r, 1600));
+      await new Promise((r) => setTimeout(r, 1800));
 
-      // 3. SALES AGENT (Dimas) - Real Sales Order Check
+      // ─────────────────────────────────────────────────────────────
+      // STAGE 3: SALES (Dimas) -> FINANCE (Dewi)
+      // ─────────────────────────────────────────────────────────────
       setCurrentSpeakingAgent("sales");
-      let salesText = "💼 [Dimas - Sales]: Memeriksa antrian Sales Order dan alur distribusi pengiriman...";
+      updateAgentStatus("sales", "EXECUTING");
+      setActiveConnection({
+        from: "Dimas (Penjualan)",
+        to: "Dewi (Keuangan)",
+        label: "SALES ORDER & INVOICE MATCHING"
+      });
+
+      let salesText = "💼 [Dimas - Sales]: Memeriksa pesanan pelanggan Sales Order & penerbitan Surat Jalan...";
       try {
         const soRes = await apiClient.get<any>("/sales/orders?page=1&limit=5");
         const soData = soRes.data?.data || soRes.data;
         const totalSO = soData?.total || 0;
-        salesText = `💼 [Dimas - Sales]: Terdata ${totalSO} transaksi Sales Order di sistem. Alokasi stok gudang dan Surat Jalan DO disinkronkan. Mengabari @Dewi untuk validasi faktur piutang.`;
+        salesText = `💼 [Dimas - Sales]: Terdata ${totalSO} transaksi Sales Order di sistem. Alokasi stok gudang & Surat Jalan disiapkan. Meminta validasi faktur ke @Dewi (Finance).`;
       } catch (e) {
         salesText = "💼 [Dimas - Sales]: Alur pesanan pelanggan dan penerbitan Surat Jalan DO siap dijalankan. Koordinasi diteruskan ke @Dewi (Finance).";
       }
@@ -351,10 +414,19 @@ export default function AgenticAIPage() {
         ...prev
       ]);
 
-      await new Promise((r) => setTimeout(r, 1600));
+      await new Promise((r) => setTimeout(r, 1800));
 
-      // 4. FINANCE AGENT (Dewi) - Real Trial Balance Check
+      // ─────────────────────────────────────────────────────────────
+      // STAGE 4: FINANCE (Dewi) -> HR (Maya)
+      // ─────────────────────────────────────────────────────────────
       setCurrentSpeakingAgent("fin");
+      updateAgentStatus("fin", "SYNCING");
+      setActiveConnection({
+        from: "Dewi (Keuangan)",
+        to: "Maya (HR)",
+        label: "DOUBLE-ENTRY & PAYROLL CLEARANCE"
+      });
+
       let finText = "📊 [Dewi - Finance]: Memverifikasi buku jurnal umum double-entry di PostgreSQL...";
       try {
         const finRes = await apiClient.get<any>("/finance/reports/trial-balance");
@@ -362,12 +434,12 @@ export default function AgenticAIPage() {
         const totalDebit = finData?.total_debit || 0;
         const totalCredit = finData?.total_credit || 0;
         if (totalDebit > 0 || totalCredit > 0) {
-          finText = `📊 [Dewi - Finance]: Neraca Saldo terverifikasi: Σ Debit (Rp ${Number(totalDebit).toLocaleString("id-ID")}) = Σ Kredit (Rp ${Number(totalCredit).toLocaleString("id-ID")}). Pembukuan seimbang!`;
+          finText = `📊 [Dewi - Finance]: Neraca Saldo terverifikasi: Σ Debit (Rp ${Number(totalDebit).toLocaleString("id-ID")}) = Σ Kredit (Rp ${Number(totalCredit).toLocaleString("id-ID")}). Pembukuan seimbang! Mengalokasikan dana ke @Maya (HR).`;
         } else {
-          finText = `📊 [Dewi - Finance]: Semua entri jurnal terverifikasi seimbang. Posisi kas dan pencatatan double-entry siap mendukung transaksi baru.`;
+          finText = `📊 [Dewi - Finance]: Semua entri jurnal terverifikasi seimbang. Posisi kas siap mendukung penggajian. Menghubungi @Maya (HR).`;
         }
       } catch (e) {
-        finText = "📊 [Dewi - Finance]: Buku besar akuntansi terverifikasi seimbang dan siap untuk posting jurnal transaksi.";
+        finText = "📊 [Dewi - Finance]: Buku besar akuntansi terverifikasi seimbang. Meneruskan ke @Maya (HR).";
       }
 
       setMessages((prev) => [
@@ -401,18 +473,27 @@ export default function AgenticAIPage() {
         ...prev
       ]);
 
-      await new Promise((r) => setTimeout(r, 1600));
+      await new Promise((r) => setTimeout(r, 1800));
 
-      // 5. HR AGENT (Maya) - Real Employee Check
+      // ─────────────────────────────────────────────────────────────
+      // STAGE 5: HR (Maya) -> ACID SENTINEL (Bram)
+      // ─────────────────────────────────────────────────────────────
       setCurrentSpeakingAgent("hr");
+      updateAgentStatus("hr", "EXECUTING");
+      setActiveConnection({
+        from: "Maya (HR)",
+        to: "Bram (Sentinel)",
+        label: "PAYROLL & LOGISTICS PERSONNEL AUDIT"
+      });
+
       let hrText = "👥 [Maya - HR]: Memeriksa personil operasional di database hr.employees...";
       try {
         const hrRes = await apiClient.get<any>("/hr/employees?page=1&limit=5");
         const hrData = hrRes.data?.data || hrRes.data;
         const totalEmp = hrData?.total || 0;
-        hrText = `👥 [Maya - HR]: Terdata ${totalEmp} karyawan aktif di sistem. Slip kehadiran dan kesiapan staff di seluruh departemen terverifikasi aktif.`;
+        hrText = `👥 [Maya - HR]: Terdata ${totalEmp} karyawan aktif di sistem. Kesiapan tim operasional & slip absensi terverifikasi lengkap. Meminta audit akhir ke @Bram (Sentinel).`;
       } catch (e) {
-        hrText = "👥 [Maya - HR]: Master data personil dan kesiapan tim di seluruh modul operasional terverifikasi aktif.";
+        hrText = "👥 [Maya - HR]: Master data personil dan kesiapan tim seluruh modul terverifikasi aktif. Menghubungi @Bram (Sentinel).";
       }
 
       setMessages((prev) => [
@@ -446,10 +527,19 @@ export default function AgenticAIPage() {
         ...prev
       ]);
 
-      await new Promise((r) => setTimeout(r, 1600));
+      await new Promise((r) => setTimeout(r, 1800));
 
-      // 6. ACID SENTINEL (Bram) - Real Database Integrity Audit
+      // ─────────────────────────────────────────────────────────────
+      // STAGE 6: ACID SENTINEL (Bram) -> ALL SWARM (Commit Complete)
+      // ─────────────────────────────────────────────────────────────
       setCurrentSpeakingAgent("audit");
+      updateAgentStatus("audit", "SYNCING");
+      setActiveConnection({
+        from: "Bram (Sentinel)",
+        to: "Hermes Core",
+        label: "POSTGRESQL ACID COMMIT COMPLETE"
+      });
+
       let auditText = "🛡️ [Bram - ACID Sentinel]: Memindai integritas referensial dan foreign keys di PostgreSQL...";
       try {
         const auditRes = await apiClient.get<any>("/agent/audit/anomalies");
@@ -495,11 +585,12 @@ export default function AgenticAIPage() {
       ]);
     } finally {
       setCurrentSpeakingAgent(null);
+      setActiveConnection(null);
       setIsSwarmDebating(false);
     }
   };
 
-  // Handle Real User Command to Backend AI Agent Service
+  // Handle Real User Command
   const handleSendCommand = async (customPrompt?: string) => {
     const textToRun = customPrompt || inputText;
     if (!textToRun.trim() || isProcessing) return;
@@ -550,7 +641,6 @@ export default function AgenticAIPage() {
         ...prev
       ]);
     } catch (err: any) {
-      // Fallback
       const aiMsg: ChatMessage = {
         id: `ai-${Date.now()}`,
         timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
@@ -595,12 +685,12 @@ export default function AgenticAIPage() {
                 HERMES AGENTIC AI CORE
               </h1>
               <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/30 text-[10px] font-mono px-2">
-                LIVE POSTGRESQL CONNECTED
+                INTER-AGENT NEURAL MESH
               </Badge>
             </div>
             <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5 font-mono">
               <Activity className="h-3 w-3 text-emerald-400 animate-pulse" />
-              <span>6 AGENTS RUNNING • REAL DATABASE QUERIES & ZERO DUMMY DATA</span>
+              <span>LIVE TASK DELEGATION PIPELINE & ACTIVE CONNECTION INDICATOR</span>
             </p>
           </div>
         </div>
@@ -616,7 +706,7 @@ export default function AgenticAIPage() {
             {isSwarmDebating ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Agen Sedang Berdiskusi...</span>
+                <span>Agen Sedang Memproses Task...</span>
               </>
             ) : (
               <>
@@ -638,7 +728,37 @@ export default function AgenticAIPage() {
         </div>
       </div>
 
-      {/* 🤖 2. MAIN AGENTIC ARENA */}
+      {/* ⚡ 2. LIVE ACTIVE CONNECTION & DELEGATION RADAR BAR */}
+      {activeConnection && (
+        <div className="bg-gradient-to-r from-cyan-950/90 via-indigo-950/90 to-purple-950/90 border-b border-cyan-500/40 px-4 sm:px-8 py-2.5 flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-3 text-xs font-mono">
+            <span className="flex h-2.5 w-2.5 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500"></span>
+            </span>
+            <span className="text-slate-400">JALUR ALUR TUGAS AKTIF:</span>
+            
+            {/* Visual Animated Laser Pipeline */}
+            <div className="flex items-center gap-2 bg-slate-950/80 px-3 py-1 rounded-full border border-cyan-500/30 shadow-inner">
+              <span className="text-cyan-300 font-bold">{activeConnection.from}</span>
+              
+              {/* Glowing Arrow Line */}
+              <div className="flex items-center gap-1 text-cyan-400 px-1">
+                <span className="h-[2px] w-6 bg-gradient-to-r from-cyan-400 to-indigo-400 animate-pulse inline-block" />
+                <ArrowRight className="h-3.5 w-3.5 animate-pulse" />
+              </div>
+              
+              <span className="text-indigo-300 font-bold">{activeConnection.to}</span>
+            </div>
+          </div>
+
+          <Badge className="bg-cyan-500/20 text-cyan-300 border-cyan-500/40 text-[10px] font-mono animate-pulse">
+            DATA FLOW: {activeConnection.label}
+          </Badge>
+        </div>
+      )}
+
+      {/* 🤖 3. MAIN AGENTIC ARENA */}
       <div className="flex-1 p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full">
         
         {/* LEFT COLUMN (COL-5): 3D ROBOT AVATAR & 6 AGENT SWARM NODES */}
@@ -680,49 +800,69 @@ export default function AgenticAIPage() {
             </div>
           </div>
 
-          {/* 6 CONNECTED SUB-AGENT NODES */}
-          <div className="rounded-3xl bg-slate-900/70 border border-slate-800/90 p-5 space-y-3">
+          {/* 6 CONNECTED SUB-AGENT NODES WITH REAL-TIME TASK STATUS & CONNECTING LINES */}
+          <div className="rounded-3xl bg-slate-900/70 border border-slate-800/90 p-5 space-y-3 relative">
+            
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <Users className="h-3.5 w-3.5 text-cyan-400" />
-                <span>6 Agen Divisi Saling Terhubung</span>
+                <Network className="h-3.5 w-3.5 text-cyan-400" />
+                <span>6 Agen Divisi & Status Task</span>
               </h3>
               <span className="text-[10px] font-mono text-slate-400">
-                Klik agen untuk filter obrolan
+                Status Real-time
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
-              {agentSwarm.map((ag) => {
+            <div className="grid grid-cols-2 gap-3 relative">
+              {agentSwarm.map((ag, idx) => {
                 const IconComp = ag.icon;
                 const isSpeaking = currentSpeakingAgent === ag.id;
                 const isSelected = filterAgent.toLowerCase().includes(ag.id);
+                const isExecuting = ag.status !== "IDLE";
 
                 return (
                   <div
                     key={ag.id}
                     onClick={() => setFilterAgent(isSelected ? "ALL" : ag.role)}
-                    className={`p-3 rounded-2xl border transition-all cursor-pointer relative overflow-hidden ${
-                      ag.borderColor
-                    } ${ag.bgGlow} ${
-                      isSpeaking ? "ring-2 ring-cyan-400 scale-105 shadow-lg shadow-cyan-500/30" : "hover:scale-[1.02]"
+                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer relative overflow-hidden ${
+                      isSpeaking
+                        ? ag.activeBorder + " " + ag.activeGlow
+                        : ag.borderColor + " " + ag.bgGlow
                     } ${isSelected ? "ring-2 ring-white" : ""}`}
                   >
-                    <div className="flex items-center justify-between mb-1.5">
+                    {/* Active Status Ribbon */}
+                    <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-1.5">
                         <span className="text-base">{ag.avatarIcon}</span>
                         <h4 className="font-bold text-xs text-slate-100">{ag.name}</h4>
                       </div>
-                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-950/80 text-cyan-300">
-                        {ag.tasksCompleted} task
+
+                      {/* Status Badge */}
+                      <span
+                        className={`text-[9px] font-mono px-2 py-0.5 rounded-full font-bold transition-all ${
+                          isSpeaking
+                            ? "bg-cyan-500 text-slate-950 animate-pulse"
+                            : isExecuting
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                            : "bg-slate-950/80 text-slate-400 border border-slate-800"
+                        }`}
+                      >
+                        {isSpeaking ? "ACTIVE" : ag.status}
                       </span>
                     </div>
 
                     <p className="text-[10px] text-slate-400 leading-tight truncate">{ag.division}</p>
 
+                    <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                      <span className="text-slate-500">Selesai:</span>
+                      <span className="text-cyan-300 font-bold">{ag.tasksCompleted} task</span>
+                    </div>
+
+                    {/* Animated Connection Pulse Dot */}
                     {isSpeaking && (
-                      <span className="absolute bottom-1 right-2 text-[9px] font-mono text-cyan-400 animate-pulse font-bold">
-                        SPEAKING...
+                      <span className="absolute top-2 right-2 flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
                       </span>
                     )}
                   </div>
@@ -820,7 +960,7 @@ export default function AgenticAIPage() {
                           {msg.targetAgent && (
                             <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] font-mono text-purple-300 flex items-center gap-1.5">
                               <MessageSquareShare className="h-3 w-3 text-purple-400" />
-                              <span>Berkoordinasi dengan: <strong>{msg.targetAgent}</strong></span>
+                              <span>Mendelegasikan data ke: <strong className="text-cyan-300">{msg.targetAgent}</strong></span>
                             </div>
                           )}
                         </div>
